@@ -81,6 +81,7 @@ fastapi-starter/
 │   ├── test_auth.py
 │   └── test_users.py
 │
+├── .dockerignore
 ├── .env.example
 ├── .gitignore
 ├── .pre-commit-config.yaml
@@ -109,11 +110,12 @@ pydantic-settings==2.3.0
 sqlalchemy==2.0.30
 asyncpg==0.29.0
 alembic==1.13.1
-python-jose[cryptography]==3.3.0
+PyJWT==2.8.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.9
 redis==5.0.4
 httpx==0.27.0
+slowapi==0.1.9
 ```
 
 ### Task 1.2: Create `requirements-dev.txt`
@@ -123,6 +125,7 @@ httpx==0.27.0
 pytest==8.2.0
 pytest-asyncio==0.23.6
 pytest-cov==5.0.0
+aiosqlite==0.20.0
 ruff==0.4.4
 pre-commit==3.7.0
 ```
@@ -130,11 +133,22 @@ pre-commit==3.7.0
 ### Task 1.3: Create `app/core/config.py`
 
 ```python
-from pydantic_settings import BaseSettings
+import logging
+import sys
 from functools import lru_cache
+
+from pydantic import ConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+    )
+
     # Project
     PROJECT_NAME: str = "FastAPI Starter"
     VERSION: str = "1.0.0"
@@ -142,22 +156,24 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/fastapi_starter"
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
 
     # Auth
-    SECRET_KEY: str
+    SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    # CORS - empty by default, must be explicitly configured
+    CORS_ORIGINS: list[str] = []
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # Rate limiting
+    RATE_LIMIT_PER_MINUTE: int = 60
+
+    # Logging
+    LOG_LEVEL: str = "INFO"
 
 
 @lru_cache
@@ -166,12 +182,31 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def setup_logging() -> None:
+    """Configure structured logging for the application."""
+    log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+    )
+
+    # Reduce noise from third-party libraries
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(
+        logging.INFO if settings.DEBUG else logging.WARNING
+    )
 ```
 
 ### Task 1.4: Create `app/db/session.py`
 
 ```python
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import settings
 
 engine = create_async_engine(
@@ -191,6 +226,7 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db():
+    """Dependency that provides a database session."""
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -207,6 +243,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
+    """SQLAlchemy declarative base for all models."""
     pass
 ```
 
@@ -214,19 +251,31 @@ class Base(DeclarativeBase):
 
 ```python
 from datetime import datetime
-from sqlalchemy import Column, DateTime, Integer
-from sqlalchemy.sql import func
+
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class TimestampMixin:
     """Add created_at and updated_at to any model."""
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class BaseModel(TimestampMixin):
     """Base model with id and timestamps."""
-    id = Column(Integer, primary_key=True, index=True)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
 ```
 
 ### Task 1.7: Create `app/core/exceptions.py`
@@ -262,23 +311,33 @@ class ForbiddenError(HTTPException):
 class ConflictError(HTTPException):
     def __init__(self, detail: str = "Resource already exists"):
         super().__init__(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
+class ServiceUnavailableError(HTTPException):
+    def __init__(self, detail: str = "Service unavailable"):
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail
+        )
 ```
 
 ### Task 1.8: Create `app/schemas/common.py`
 
 ```python
-from pydantic import BaseModel
-from typing import Generic, TypeVar
 from datetime import datetime
+from typing import Generic, TypeVar
+
+from pydantic import BaseModel, ConfigDict
 
 T = TypeVar("T")
 
 
 class MessageResponse(BaseModel):
+    """Simple message response."""
     message: str
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
+    """Paginated response wrapper."""
     items: list[T]
     total: int
     page: int
@@ -287,25 +346,28 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 
 class PaginationParams(BaseModel):
+    """Pagination query parameters."""
     page: int = 1
     per_page: int = 20
 
 
 class TimestampSchema(BaseModel):
+    """Base schema with timestamp fields."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 ```
 
 ### Task 1.9: Create `app/api/v1/health.py`
 
 ```python
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ServiceUnavailableError
 from app.db.session import get_db
 from app.schemas.common import MessageResponse
 
@@ -314,18 +376,18 @@ router = APIRouter()
 
 @router.get("/", response_model=MessageResponse)
 async def health_check():
-    """Basic health check."""
+    """Basic health check endpoint."""
     return {"message": "healthy"}
 
 
 @router.get("/ready", response_model=MessageResponse)
 async def readiness_check(db: AsyncSession = Depends(get_db)):
-    """Readiness check - verifies database connection."""
+    """Readiness check - verifies database connection is working."""
     try:
         await db.execute(text("SELECT 1"))
         return {"message": "ready"}
     except Exception as e:
-        return {"message": f"not ready: {str(e)}"}
+        raise ServiceUnavailableError(detail=f"not ready: {str(e)}")
 ```
 
 ### Task 1.10: Create `app/api/v1/router.py`
@@ -333,7 +395,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
 ```python
 from fastapi import APIRouter
 
-from app.api.v1 import health, auth, users
+from app.api.v1 import auth, health, users
 
 api_router = APIRouter()
 
@@ -346,16 +408,20 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 
 ```python
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.router import api_router
-from app.core.config import settings
+from app.core.config import settings, setup_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    setup_logging()
     yield
     # Shutdown
 
@@ -369,14 +435,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate limit error handler
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if settings.CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Routes
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
@@ -394,87 +464,125 @@ async def root():
 ### Task 2.1: Create `app/models/user.py`
 
 ```python
-from sqlalchemy import Column, String, Boolean, Integer
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+
 from app.db.base import Base
 from app.models.base import BaseModel
 
 
 class User(Base, BaseModel):
+    """User model for authentication and authorization."""
+
     __tablename__ = "users"
 
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_superuser = Column(Boolean, default=False, nullable=False)
+    email: Mapped[str] = mapped_column(
+        String(255), unique=True, index=True, nullable=False
+    )
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    is_superuser: Mapped[bool] = mapped_column(default=False, nullable=False)
 ```
 
 ### Task 2.2: Create `app/schemas/user.py`
 
 ```python
-from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
-# Request schemas
+
 class UserCreate(BaseModel):
+    """Schema for creating a new user."""
+
     email: EmailStr
     password: str
     full_name: str | None = None
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
 
 class UserUpdate(BaseModel):
+    """Schema for updating an existing user."""
+
     email: EmailStr | None = None
     password: str | None = None
     full_name: str | None = None
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str | None) -> str | None:
+        if v is not None and len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
 
-# Response schemas
+
 class UserResponse(BaseModel):
+    """Schema for user response (public fields only)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     email: str
     full_name: str | None
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class UserInDB(UserResponse):
+    """Schema for user with hashed password (internal use)."""
     hashed_password: str
 ```
 
 ### Task 2.3: Create `app/schemas/auth.py`
 
 ```python
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 
 class Token(BaseModel):
+    """JWT token response."""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
 class TokenPayload(BaseModel):
+    """JWT token payload."""
     sub: int | None = None
     exp: int | None = None
     type: str | None = None
 
 
 class LoginRequest(BaseModel):
+    """Login request body."""
     email: EmailStr
     password: str
 
 
 class RegisterRequest(BaseModel):
+    """User registration request body."""
+
     email: EmailStr
     password: str
     full_name: str | None = None
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
 
 class RefreshRequest(BaseModel):
+    """Token refresh request body."""
     refresh_token: str
 ```
 
@@ -484,7 +592,7 @@ class RefreshRequest(BaseModel):
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from jose import jwt, JWTError
+import jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
@@ -493,14 +601,17 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
+    """Hash a password using bcrypt."""
     return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash."""
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def create_token(subject: int, token_type: str, expires_delta: timedelta) -> str:
+    """Create a JWT token with the given subject and expiration."""
     expire = datetime.now(timezone.utc) + expires_delta
     to_encode = {
         "sub": str(subject),
@@ -511,6 +622,7 @@ def create_token(subject: int, token_type: str, expires_delta: timedelta) -> str
 
 
 def create_access_token(subject: int) -> str:
+    """Create an access token for the given user ID."""
     return create_token(
         subject=subject,
         token_type="access",
@@ -519,6 +631,7 @@ def create_access_token(subject: int) -> str:
 
 
 def create_refresh_token(subject: int) -> str:
+    """Create a refresh token for the given user ID."""
     return create_token(
         subject=subject,
         token_type="refresh",
@@ -527,20 +640,24 @@ def create_refresh_token(subject: int) -> str:
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
+    """Decode and validate a JWT token. Returns None if invalid."""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
         return payload
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 ```
 
 ### Task 2.5: Create `app/services/base.py`
 
 ```python
-from typing import TypeVar, Generic, Type
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import Base
 
@@ -550,32 +667,35 @@ UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 
 class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
-    def __init__(self, model: Type[ModelType], db: AsyncSession):
+    """Base service with CRUD operations for SQLAlchemy models."""
+
+    def __init__(self, model: type[ModelType], db: AsyncSession):
         self.model = model
         self.db = db
 
     async def get(self, id: int) -> ModelType | None:
+        """Get a single record by ID."""
         result = await self.db.execute(select(self.model).where(self.model.id == id))
         return result.scalar_one_or_none()
 
     async def get_multi(
         self, skip: int = 0, limit: int = 100
     ) -> tuple[list[ModelType], int]:
-        # Get items
+        """Get multiple records with pagination."""
         result = await self.db.execute(
             select(self.model).offset(skip).limit(limit)
         )
         items = list(result.scalars().all())
-        
-        # Get total count
+
         count_result = await self.db.execute(
             select(func.count()).select_from(self.model)
         )
         total = count_result.scalar_one()
-        
+
         return items, total
 
     async def create(self, obj_in: CreateSchemaType) -> ModelType:
+        """Create a new record."""
         db_obj = self.model(**obj_in.model_dump())
         self.db.add(db_obj)
         await self.db.flush()
@@ -583,6 +703,7 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return db_obj
 
     async def update(self, db_obj: ModelType, obj_in: UpdateSchemaType) -> ModelType:
+        """Update an existing record."""
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
@@ -591,6 +712,7 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return db_obj
 
     async def delete(self, id: int) -> bool:
+        """Delete a record by ID."""
         obj = await self.get(id)
         if obj:
             await self.db.delete(obj)
@@ -602,24 +724,28 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 ### Task 2.6: Create `app/services/user_service.py`
 
 ```python
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.services.base import BaseService
-from app.core.security import hash_password, verify_password
 
 
 class UserService(BaseService[User, UserCreate, UserUpdate]):
+    """Service for user-related operations."""
+
     def __init__(self, db: AsyncSession):
         super().__init__(User, db)
 
     async def get_by_email(self, email: str) -> User | None:
+        """Get a user by email address."""
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
     async def create(self, obj_in: UserCreate) -> User:
+        """Create a new user with hashed password."""
         db_obj = User(
             email=obj_in.email,
             hashed_password=hash_password(obj_in.password),
@@ -631,6 +757,7 @@ class UserService(BaseService[User, UserCreate, UserUpdate]):
         return db_obj
 
     async def authenticate(self, email: str, password: str) -> User | None:
+        """Authenticate a user by email and password."""
         user = await self.get_by_email(email)
         if not user:
             return None
@@ -639,6 +766,7 @@ class UserService(BaseService[User, UserCreate, UserUpdate]):
         return user
 
     async def update_password(self, user: User, new_password: str) -> User:
+        """Update a user's password."""
         user.hashed_password = hash_password(new_password)
         await self.db.flush()
         await self.db.refresh(user)
@@ -652,46 +780,48 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.core.security import decode_token
 from app.core.exceptions import UnauthorizedError
-from app.services.user_service import UserService
+from app.core.security import decode_token
+from app.db.session import get_db
 from app.models.user import User
+from app.services.user_service import UserService
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login/form")
 
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    """Dependency to get the current authenticated user from JWT token."""
     payload = decode_token(token)
-    
+
     if not payload:
         raise UnauthorizedError("Invalid token")
-    
+
     if payload.get("type") != "access":
         raise UnauthorizedError("Invalid token type")
-    
+
     user_id = payload.get("sub")
     if not user_id:
         raise UnauthorizedError("Invalid token payload")
-    
+
     service = UserService(db)
     user = await service.get(int(user_id))
-    
+
     if not user:
         raise UnauthorizedError("User not found")
-    
+
     if not user.is_active:
         raise UnauthorizedError("User is inactive")
-    
+
     return user
 
 
 async def get_current_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:
+    """Dependency to ensure the current user is a superuser."""
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -703,53 +833,63 @@ async def get_current_superuser(
 ### Task 2.8: Create `app/api/v1/auth.py`
 
 ```python
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
+from app.core.config import settings
+from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.db.session import get_db
-from app.schemas.auth import Token, LoginRequest, RegisterRequest, RefreshRequest
+from app.models.user import User
+from app.schemas.auth import RefreshRequest, RegisterRequest, Token
 from app.schemas.user import UserResponse
 from app.services.user_service import UserService
-from app.core.security import create_access_token, create_refresh_token, decode_token
-from app.core.exceptions import BadRequestError, UnauthorizedError, ConflictError
-from app.api.deps import get_current_user
-from app.models.user import User
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def register(
+    request: Request,
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Register a new user."""
     service = UserService(db)
-    
+
     existing = await service.get_by_email(data.email)
     if existing:
         raise ConflictError("Email already registered")
-    
+
     user = await service.create(data)
     return user
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def login(
-    data: LoginRequest,
+    request: Request,
+    data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Login and get access + refresh tokens."""
     service = UserService(db)
-    
+
     user = await service.authenticate(data.email, data.password)
     if not user:
         raise UnauthorizedError("Invalid email or password")
-    
+
     if not user.is_active:
         raise UnauthorizedError("User is inactive")
-    
+
     return Token(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
@@ -757,17 +897,19 @@ async def login(
 
 
 @router.post("/login/form", response_model=Token)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def login_form(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Login via form (for Swagger UI)."""
+    """Login via form (for Swagger UI OAuth2 flow)."""
     service = UserService(db)
-    
+
     user = await service.authenticate(form_data.username, form_data.password)
     if not user:
         raise UnauthorizedError("Invalid email or password")
-    
+
     return Token(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
@@ -775,26 +917,28 @@ async def login_form(
 
 
 @router.post("/refresh", response_model=Token)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def refresh_token(
+    request: Request,
     data: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Get new access token using refresh token."""
     payload = decode_token(data.refresh_token)
-    
+
     if not payload or payload.get("type") != "refresh":
         raise UnauthorizedError("Invalid refresh token")
-    
+
     user_id = payload.get("sub")
     if not user_id:
         raise UnauthorizedError("Invalid token payload")
-    
+
     service = UserService(db)
     user = await service.get(int(user_id))
-    
+
     if not user or not user.is_active:
         raise UnauthorizedError("User not found or inactive")
-    
+
     return Token(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
@@ -813,13 +957,13 @@ async def get_me(current_user: User = Depends(get_current_user)):
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_superuser, get_current_user
+from app.core.exceptions import ConflictError, NotFoundError
 from app.db.session import get_db
-from app.schemas.user import UserResponse, UserUpdate
-from app.schemas.common import PaginatedResponse
-from app.services.user_service import UserService
-from app.core.exceptions import NotFoundError, ConflictError
-from app.api.deps import get_current_user, get_current_superuser
 from app.models.user import User
+from app.schemas.common import PaginatedResponse
+from app.schemas.user import UserResponse, UserUpdate
+from app.services.user_service import UserService
 
 router = APIRouter()
 
@@ -834,10 +978,10 @@ async def list_users(
     """List all users (superuser only)."""
     service = UserService(db)
     skip = (page - 1) * per_page
-    
+
     users, total = await service.get_multi(skip=skip, limit=per_page)
     pages = (total + per_page - 1) // per_page
-    
+
     return PaginatedResponse(
         items=users,
         total=total,
@@ -853,13 +997,13 @@ async def get_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get a specific user."""
+    """Get a specific user by ID."""
     service = UserService(db)
     user = await service.get(user_id)
-    
+
     if not user:
         raise NotFoundError("User not found")
-    
+
     return user
 
 
@@ -873,26 +1017,41 @@ async def update_user(
     """Update a user (own profile or superuser)."""
     if current_user.id != user_id and not current_user.is_superuser:
         raise NotFoundError("User not found")
-    
+
     service = UserService(db)
     user = await service.get(user_id)
-    
+
     if not user:
         raise NotFoundError("User not found")
-    
+
     # Check email uniqueness if changing
     if data.email and data.email != user.email:
         existing = await service.get_by_email(data.email)
         if existing:
             raise ConflictError("Email already in use")
-    
+
     # Handle password separately
     if data.password:
         await service.update_password(user, data.password)
         data.password = None
-    
+
     updated = await service.update(user, data)
     return updated
+
+
+@router.delete("/{user_id}", status_code=204)
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_superuser),
+):
+    """Delete a user (superuser only)."""
+    service = UserService(db)
+
+    if not await service.delete(user_id):
+        raise NotFoundError("User not found")
+
+    return None
 ```
 
 ---
@@ -905,6 +1064,7 @@ async def update_user(
 # Project
 PROJECT_NAME=FastAPI Starter
 DEBUG=true
+LOG_LEVEL=INFO
 
 # Database
 DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/fastapi_starter
@@ -914,8 +1074,11 @@ SECRET_KEY=your-super-secret-key-change-in-production
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# CORS
+# CORS (JSON array format)
 CORS_ORIGINS=["http://localhost:3000"]
+
+# Rate limiting
+RATE_LIMIT_PER_MINUTE=60
 ```
 
 ### Task 3.2: Create `Dockerfile`
@@ -950,14 +1113,15 @@ USER appuser
 
 EXPOSE 8000
 
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/')" || exit 1
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ### Task 3.3: Create `docker-compose.yml`
 
 ```yaml
-version: "3.8"
-
 services:
   api:
     build: .
@@ -995,8 +1159,6 @@ volumes:
 ### Task 3.4: Create `docker-compose.dev.yml`
 
 ```yaml
-version: "3.8"
-
 services:
   api:
     build: .
@@ -1033,7 +1195,27 @@ volumes:
   postgres_data_dev:
 ```
 
-### Task 3.5: Create `Makefile`
+### Task 3.5: Create `.dockerignore`
+
+```
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.env
+.env.*
+*.md
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.ruff_cache/
+```
+
+### Task 3.6: Create `Makefile`
 
 ```makefile
 .PHONY: help dev prod down logs test lint format migrate migration shell
@@ -1084,7 +1266,7 @@ shell:
 	docker compose exec api /bin/bash
 ```
 
-### Task 3.6: Create `alembic.ini`
+### Task 3.7: Create `alembic.ini`
 
 ```ini
 [alembic]
@@ -1129,7 +1311,7 @@ format = %(levelname)-5.5s [%(name)s] %(message)s
 datefmt = %H:%M:%S
 ```
 
-### Task 3.7: Create `alembic/env.py`
+### Task 3.8: Create `alembic/env.py`
 
 ```python
 import asyncio
@@ -1143,7 +1325,7 @@ from alembic import context
 
 from app.core.config import settings
 from app.db.base import Base
-from app.models.user import User  # Import all models here
+from app.models.user import User  # noqa: F401 - Import all models here
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
@@ -1197,7 +1379,38 @@ else:
     run_migrations_online()
 ```
 
-### Task 3.8: Create `pyproject.toml`
+### Task 3.9: Create `alembic/script.py.mako`
+
+```mako
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
+```
+
+### Task 3.10: Create `pyproject.toml`
 
 ```toml
 [project]
@@ -1231,7 +1444,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 ```
 
-### Task 3.9: Create `.gitignore`
+### Task 3.11: Create `.gitignore`
 
 ```
 # Python
@@ -1264,6 +1477,7 @@ htmlcov/
 # Database
 *.db
 *.sqlite3
+test.db
 
 # Logs
 *.log
@@ -1274,6 +1488,21 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Ruff
+.ruff_cache/
+```
+
+### Task 3.12: Create `.pre-commit-config.yaml`
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
 ```
 
 ---
@@ -1283,22 +1512,27 @@ Thumbs.db
 ### Task 4.1: Create `tests/conftest.py`
 
 ```python
-import pytest
 import asyncio
 from typing import AsyncGenerator
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-from app.main import app
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import get_db
-from app.core.security import create_access_token
+from app.main import app
+from app.models.user import User
+from app.services.user_service import UserService
 
 # Test database URL (use SQLite for tests)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestingSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+TestingSessionLocal = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
 @pytest.fixture(scope="session")
@@ -1329,17 +1563,59 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
-    
+
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
-def auth_headers() -> dict:
-    token = create_access_token(subject=1)
+async def test_user(db_session: AsyncSession) -> User:
+    """Create a test user for authenticated tests."""
+    from app.schemas.user import UserCreate
+
+    service = UserService(db_session)
+    user_data = UserCreate(
+        email="testuser@example.com",
+        password="testpassword123",
+        full_name="Test User",
+    )
+    user = await service.create(user_data)
+    await db_session.commit()
+    return user
+
+
+@pytest.fixture
+async def auth_headers(test_user: User) -> dict:
+    """Get auth headers for authenticated requests."""
+    token = create_access_token(subject=test_user.id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def superuser(db_session: AsyncSession) -> User:
+    """Create a superuser for admin tests."""
+    from app.core.security import hash_password
+
+    user = User(
+        email="admin@example.com",
+        hashed_password=hash_password("adminpassword123"),
+        full_name="Admin User",
+        is_superuser=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    await db_session.refresh(user)
+    await db_session.commit()
+    return user
+
+
+@pytest.fixture
+async def superuser_headers(superuser: User) -> dict:
+    """Get auth headers for superuser requests."""
+    token = create_access_token(subject=superuser.id)
     return {"Authorization": f"Bearer {token}"}
 ```
 
@@ -1361,6 +1637,7 @@ async def test_health_check(client: AsyncClient):
 async def test_readiness_check(client: AsyncClient):
     response = await client.get("/api/v1/health/ready")
     assert response.status_code == 200
+    assert response.json() == {"message": "ready"}
 ```
 
 ### Task 4.3: Create `tests/test_auth.py`
@@ -1375,15 +1652,27 @@ async def test_register_user(client: AsyncClient):
     response = await client.post(
         "/api/v1/auth/register",
         json={
-            "email": "test@example.com",
+            "email": "newuser@example.com",
             "password": "testpassword123",
-            "full_name": "Test User",
+            "full_name": "New User",
         },
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["email"] == "test@example.com"
+    assert data["email"] == "newuser@example.com"
     assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_register_short_password(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "short@example.com",
+            "password": "short",
+        },
+    )
+    assert response.status_code == 422  # Validation error
 
 
 @pytest.mark.asyncio
@@ -1393,7 +1682,7 @@ async def test_register_duplicate_email(client: AsyncClient):
         "/api/v1/auth/register",
         json={"email": "dupe@example.com", "password": "password123"},
     )
-    
+
     # Duplicate registration
     response = await client.post(
         "/api/v1/auth/register",
@@ -1409,7 +1698,7 @@ async def test_login(client: AsyncClient):
         "/api/v1/auth/register",
         json={"email": "login@example.com", "password": "password123"},
     )
-    
+
     # Login
     response = await client.post(
         "/api/v1/auth/login",
@@ -1419,6 +1708,7 @@ async def test_login(client: AsyncClient):
     data = response.json()
     assert "access_token" in data
     assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
 
 
 @pytest.mark.asyncio
@@ -1428,6 +1718,111 @@ async def test_login_invalid_credentials(client: AsyncClient):
         json={"email": "nobody@example.com", "password": "wrongpassword"},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_token(client: AsyncClient):
+    # Register and login
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": "refresh@example.com", "password": "password123"},
+    )
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "refresh@example.com", "password": "password123"},
+    )
+    refresh_token = login_response.json()["refresh_token"]
+
+    # Refresh
+    response = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_get_me(client: AsyncClient, auth_headers: dict):
+    response = await client.get("/api/v1/auth/me", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "email" in data
+    assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_get_me_unauthorized(client: AsyncClient):
+    response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+```
+
+### Task 4.4: Create `tests/test_users.py`
+
+```python
+import pytest
+from httpx import AsyncClient
+
+from app.models.user import User
+
+
+@pytest.mark.asyncio
+async def test_get_user(client: AsyncClient, auth_headers: dict, test_user: User):
+    response = await client.get(
+        f"/api/v1/users/{test_user.id}", headers=auth_headers
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == test_user.email
+
+
+@pytest.mark.asyncio
+async def test_get_user_not_found(client: AsyncClient, auth_headers: dict):
+    response = await client.get("/api/v1/users/99999", headers=auth_headers)
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_own_user(client: AsyncClient, auth_headers: dict, test_user: User):
+    response = await client.patch(
+        f"/api/v1/users/{test_user.id}",
+        headers=auth_headers,
+        json={"full_name": "Updated Name"},
+    )
+    assert response.status_code == 200
+    assert response.json()["full_name"] == "Updated Name"
+
+
+@pytest.mark.asyncio
+async def test_list_users_requires_superuser(client: AsyncClient, auth_headers: dict):
+    response = await client.get("/api/v1/users/", headers=auth_headers)
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_users_as_superuser(client: AsyncClient, superuser_headers: dict):
+    response = await client.get("/api/v1/users/", headers=superuser_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert "total" in data
+    assert "page" in data
+
+
+@pytest.mark.asyncio
+async def test_delete_user_as_superuser(
+    client: AsyncClient, superuser_headers: dict, test_user: User
+):
+    response = await client.delete(
+        f"/api/v1/users/{test_user.id}", headers=superuser_headers
+    )
+    assert response.status_code == 204
+
+    # Verify deletion
+    response = await client.get(
+        f"/api/v1/users/{test_user.id}", headers=superuser_headers
+    )
+    assert response.status_code == 404
 ```
 
 ---
@@ -1450,25 +1845,13 @@ Every new project shouldn't start from zero. This template solves:
 - **Inconsistency** — Same patterns across all your projects
 - **Slow starts** — Clone and start building features immediately
 
-## Use Cases
+## Features
 
-### Side Projects & MVPs
-Clone → add your domain logic → deploy. Skip the boilerplate phase entirely.
-
-### Take-Home Interviews
-Impress with professional project structure. Focus your time on solving the actual problem, not wiring up auth.
-
-### Freelance/Client Work
-Start every client project with production-grade foundations. Look professional from commit one.
-
-### Internal Tools
-Need a quick CRUD app or dashboard backend? Clone, customize, done.
-
-### Hackathons
-When you have 24 hours, spend them on features — not Googling "FastAPI JWT tutorial" again.
-
-### Microservices
-Consistent structure across services makes maintenance and onboarding easier.
+- **Modern Python** — Python 3.12+, type hints throughout
+- **Async everything** — SQLAlchemy 2.0 async, FastAPI async endpoints
+- **Secure by default** — JWT auth, password hashing, rate limiting, safe CORS
+- **Production-ready** — Docker, health checks, structured logging
+- **Well-tested** — Async pytest setup included
 
 ## Quick Start
 
@@ -1500,6 +1883,7 @@ make dev
 | Containers | Docker & Docker Compose |
 | Testing | Pytest (async) |
 | Linting | Ruff |
+| Rate Limiting | slowapi |
 
 ## Project Structure
 
@@ -1529,6 +1913,7 @@ app/
 - `GET /api/v1/users/` — List users (admin only)
 - `GET /api/v1/users/{id}` — Get user
 - `PATCH /api/v1/users/{id}` — Update user
+- `DELETE /api/v1/users/{id}` — Delete user (admin only)
 
 ## Common Commands
 
@@ -1560,8 +1945,10 @@ make migration m="add posts table"  # Create new migration
 | `DATABASE_URL` | PostgreSQL connection string | Required |
 | `SECRET_KEY` | JWT signing key | Required |
 | `DEBUG` | Enable debug mode | `false` |
+| `CORS_ORIGINS` | Allowed origins (JSON array) | `[]` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token TTL | `30` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token TTL | `7` |
+| `RATE_LIMIT_PER_MINUTE` | Auth endpoint rate limit | `60` |
 
 ## License
 
