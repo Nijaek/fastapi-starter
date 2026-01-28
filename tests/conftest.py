@@ -1,45 +1,42 @@
 import asyncio
+import os
 from typing import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# Mock Redis before importing app modules
-@pytest.fixture(scope="session", autouse=True)
-def mock_redis_module():
-    """Mock Redis module before any app imports."""
-    import sys
-    from unittest.mock import MagicMock, AsyncMock
+# Set test SECRET_KEY before importing app modules
+os.environ["SECRET_KEY"] = "test-secret-key-must-be-at-least-32-characters-long"
 
-    # Create a fake redis module
-    fake_redis_client = MagicMock()
-    fake_redis_client.setex = AsyncMock(return_value=True)
-    fake_redis_client.get = AsyncMock(return_value=None)
-    fake_redis_client.exists = AsyncMock(return_value=True)
-    fake_redis_client.delete = AsyncMock(return_value=1)
-    fake_redis_client.scan_iter = MagicMock(return_value=iter([]))
-    fake_redis_client.close = AsyncMock()
-
-    # Patch get_redis to return our mock
-    import app.core.redis as redis_module
-    original_get_redis = redis_module.get_redis
-
-    async def mock_get_redis():
-        return fake_redis_client
-
-    redis_module.get_redis = mock_get_redis
-    yield fake_redis_client
-    redis_module.get_redis = original_get_redis
+# Create a fake redis client for tests
+_fake_redis_client = MagicMock()
+_fake_redis_client.setex = AsyncMock(return_value=True)
+_fake_redis_client.get = AsyncMock(return_value=None)
+_fake_redis_client.exists = AsyncMock(return_value=True)
+_fake_redis_client.delete = AsyncMock(return_value=1)
+_fake_redis_client.scan_iter = MagicMock(return_value=iter([]))
+_fake_redis_client.close = AsyncMock()
 
 
-from app.core.security import create_access_token, hash_password
-from app.db.base import Base
-from app.db.session import get_db
-from app.main import app
-from app.models.user import User
-from app.services.user_service import UserService
+async def _mock_get_redis():
+    return _fake_redis_client
+
+
+# Patch Redis at the module level before any imports
+_redis_patcher = patch("app.core.redis.get_redis", _mock_get_redis)
+_redis_patcher.start()
+
+from app.core.security import create_access_token, hash_password  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.db.session import get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.services.user_service import UserService  # noqa: E402
+
+# Also patch where it's imported in security.py
+patch("app.core.security.get_redis", _mock_get_redis).start()
 
 # Test database URL (use SQLite for tests)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"

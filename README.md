@@ -1,0 +1,137 @@
+# FastAPI Starter
+
+A production-ready REST API template. Clone it, customize it, ship faster.
+
+## Why This Exists
+
+Every new project shouldn't start from zero. This template solves:
+
+- **Repetitive setup** - Auth, database, Docker already configured
+- **Decision fatigue** - Folder structure and patterns pre-decided
+- **Inconsistency** - Same patterns across all your projects
+- **Slow starts** - Clone and start building features immediately
+
+## Features
+
+- **Modern Python** - Python 3.12+, type hints throughout
+- **Async everything** - SQLAlchemy 2.0 async, FastAPI async endpoints
+- **Secure by default** - JWT auth with token revocation, strong password policy, rate limiting
+- **Production-ready** - Docker, health checks, structured logging
+- **Well-tested** - Async pytest setup included
+
+## Quick Start
+
+```bash
+# Clone the template
+git clone https://github.com/yourusername/fastapi-starter.git my-project
+cd my-project
+
+# Copy environment file
+cp .env.example .env
+
+# Generate a secure SECRET_KEY (must be at least 32 characters)
+openssl rand -hex 32
+
+# Start everything
+make dev
+
+# API running at http://localhost:8000
+# Docs at http://localhost:8000/api/v1/docs
+```
+
+## What's Included
+
+| Feature | Implementation |
+|---------|---------------|
+| Framework | FastAPI |
+| ORM | SQLAlchemy 2.0 (async) |
+| Validation | Pydantic v2 |
+| Auth | JWT (access + refresh tokens) with Redis-based revocation |
+| Database | PostgreSQL |
+| Cache | Redis (token revocation) |
+| Migrations | Alembic |
+| Containers | Docker & Docker Compose |
+| Testing | Pytest (async) |
+| Linting | Ruff |
+| Rate Limiting | slowapi |
+
+## Project Structure
+
+```
+app/
+├── api/v1/          # Route handlers
+├── core/            # Config, security, exceptions, validators
+├── db/              # Database setup
+├── models/          # SQLAlchemy models
+├── schemas/         # Pydantic schemas
+└── services/        # Business logic
+```
+
+## API Endpoints
+
+### Health
+- `GET /api/v1/health/` - Basic health check
+- `GET /api/v1/health/ready` - Readiness check (DB connection)
+
+### Auth
+- `POST /api/v1/auth/register` - Register new user
+- `POST /api/v1/auth/login` - Get tokens
+- `POST /api/v1/auth/refresh` - Refresh access token
+- `POST /api/v1/auth/logout` - Revoke refresh token
+- `GET /api/v1/auth/me` - Get current user
+
+### Users
+- `GET /api/v1/users/` - List users (admin only)
+- `GET /api/v1/users/{id}` - Get user (own profile or admin)
+- `PATCH /api/v1/users/{id}` - Update user (own profile or admin)
+- `DELETE /api/v1/users/{id}` - Delete user (admin only)
+
+## Security
+
+This template includes security best practices:
+
+- **Password Policy**: Minimum 12 characters, must contain uppercase, lowercase, and digit
+- **Token Revocation**: Redis-based refresh token revocation with logout endpoint
+- **IDOR Protection**: Users can only access their own profile unless admin
+- **Rate Limiting**: Configurable rate limits on auth endpoints
+- **No Default Secrets**: `SECRET_KEY` is required and must be at least 32 characters
+
+## Common Commands
+
+```bash
+make dev             # Start dev environment (hot reload)
+make prod            # Start production environment
+make down            # Stop all containers
+make logs            # View container logs
+make test            # Run tests
+make lint            # Run linter
+make format          # Format code
+make migrate         # Run database migrations
+make migration m="add posts table"  # Create new migration
+```
+
+## Customizing
+
+1. **Update config** - Edit `app/core/config.py` with your settings
+2. **Add models** - Create new models in `app/models/`
+3. **Add schemas** - Create Pydantic schemas in `app/schemas/`
+4. **Add services** - Business logic in `app/services/`
+5. **Add routes** - New endpoints in `app/api/v1/`
+6. **Register routes** - Add to `app/api/v1/router.py`
+
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `SECRET_KEY` | JWT signing key (min 32 chars) | Yes |
+| `REDIS_URL` | Redis connection string | Yes |
+| `DEBUG` | Enable debug mode | No (default: `false`) |
+| `CORS_ORIGINS` | Allowed origins (JSON array) | No (default: `[]`) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token TTL | No (default: `30`) |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token TTL | No (default: `7`) |
+| `RATE_LIMIT_PER_MINUTE` | Auth endpoint rate limit | No (default: `60`) |
+
+## License
+
+MIT - Use it however you want.

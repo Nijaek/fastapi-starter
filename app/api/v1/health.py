@@ -22,4 +22,4 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
         await db.execute(text("SELECT 1"))
         return {"message": "ready"}
     except Exception as e:
-        raise ServiceUnavailableError(detail=f"not ready: {str(e)}")
+        raise ServiceUnavailableError(detail=f"not ready: {str(e)}") from e
