@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api.v1.router import api_router
 from app.core.config import settings, setup_logging
 from app.core.limiter import limiter
+from app.core.redis import close_redis
 from app.db.session import engine
 
 
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     yield
     # Shutdown
+    await close_redis()
     await engine.dispose()
 
 

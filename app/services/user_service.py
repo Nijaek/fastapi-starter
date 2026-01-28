@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password, revoke_all_user_tokens, verify_password
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.services.base import BaseService
@@ -42,8 +42,10 @@ class UserService(BaseService[User, UserCreate, UserUpdate]):
         return user
 
     async def update_password(self, user: User, new_password: str) -> User:
-        """Update a user's password."""
+        """Update a user's password and revoke all existing tokens."""
         user.hashed_password = hash_password(new_password)
         await self.db.flush()
         await self.db.refresh(user)
+        # Revoke all existing refresh tokens for security
+        await revoke_all_user_tokens(user.id)
         return user

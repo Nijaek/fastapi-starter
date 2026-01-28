@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # CORS - empty by default, must be explicitly configured
     CORS_ORIGINS: list[str] = []
 
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 60
 
