@@ -42,6 +42,10 @@ async def get_user(
     current_user: User = Depends(get_current_user),
 ):
     """Get a specific user by ID."""
+    # Users can only view their own profile unless superuser
+    if current_user.id != user_id and not current_user.is_superuser:
+        raise NotFoundError("User not found")
+
     service = UserService(db)
     user = await service.get(user_id)
 
@@ -77,10 +81,14 @@ async def update_user(
     # Handle password separately
     if data.password:
         await service.update_password(user, data.password)
-        data.password = None
 
-    updated = await service.update(user, data)
-    return updated
+    # Exclude password from the update data
+    update_data = data.model_dump(exclude_unset=True, exclude={"password"})
+    for field, value in update_data.items():
+        setattr(user, field, value)
+    await service.db.flush()
+    await service.db.refresh(user)
+    return user
 
 
 @router.delete("/{user_id}", status_code=204)

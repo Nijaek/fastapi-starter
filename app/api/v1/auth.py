@@ -1,21 +1,19 @@
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.limiter import limiter
 from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.auth import RefreshRequest, RegisterRequest, Token
+from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, Token
 from app.schemas.user import UserResponse
 from app.services.user_service import UserService
 
 router = APIRouter()
-limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post(
@@ -42,7 +40,7 @@ async def register(
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def login(
     request: Request,
-    data: RegisterRequest,
+    data: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Login and get access + refresh tokens."""

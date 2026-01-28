@@ -2,7 +2,7 @@ import logging
 import sys
 from functools import lru_cache
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 10
 
     # Auth
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str  # No default - required
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -39,6 +39,15 @@ class Settings(BaseSettings):
 
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        if len(v) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters")
+        if v == "change-me-in-production":
+            raise ValueError("SECRET_KEY must be changed from default")
+        return v
 
 
 @lru_cache

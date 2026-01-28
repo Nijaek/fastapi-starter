@@ -7,6 +7,8 @@ from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.router import api_router
 from app.core.config import settings, setup_logging
+from app.core.limiter import limiter
+from app.db.session import engine
 
 
 @asynccontextmanager
@@ -15,6 +17,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     yield
     # Shutdown
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -26,7 +29,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Rate limit error handler
+# Rate limiter
+app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS

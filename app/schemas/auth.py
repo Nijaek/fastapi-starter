@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr, field_validator
 
+from app.core.validators import validate_password_strength
+
 
 class Token(BaseModel):
     """JWT token response."""
@@ -31,9 +33,7 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+        return validate_password_strength(v)
 
 
 class RefreshRequest(BaseModel):

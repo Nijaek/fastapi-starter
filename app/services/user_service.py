@@ -34,6 +34,8 @@ class UserService(BaseService[User, UserCreate, UserUpdate]):
         """Authenticate a user by email and password."""
         user = await self.get_by_email(email)
         if not user:
+            # Run bcrypt anyway to prevent timing attacks
+            verify_password(password, "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.S9h0vqXp1V.1Wy")
             return None
         if not verify_password(password, user.hashed_password):
             return None
