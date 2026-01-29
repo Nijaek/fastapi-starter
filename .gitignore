@@ -42,3 +42,7 @@ Thumbs.db
 
 # Ruff
 .ruff_cache/
+
+# Project-specific
+agents.md
+claw.md
