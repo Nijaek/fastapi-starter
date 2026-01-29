@@ -1,6 +1,5 @@
-import asyncio
 import os
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,13 +45,6 @@ async def _mock_get_redis():
 _redis_patcher = patch("app.core.redis.get_redis", _mock_get_redis)
 _redis_patcher.start()
 
-from app.core.security import create_access_token, hash_password  # noqa: E402
-from app.db.base import Base  # noqa: E402
-from app.db.session import get_db  # noqa: E402
-from app.main import app  # noqa: E402
-from app.models.user import User  # noqa: E402
-from app.services.user_service import UserService  # noqa: E402
-
 # Also patch where it's imported in security.py
 patch("app.core.security.get_redis", _mock_get_redis).start()
 
@@ -62,9 +54,15 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestingSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+# Type checking imports only (for IDE support without importing at runtime)
+if TYPE_CHECKING:
+    pass
+
 
 @pytest.fixture(autouse=True)
 async def setup_database():
+    from app.db.base import Base
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -80,6 +78,9 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    from app.db.session import get_db
+    from app.main import app
+
     async def override_get_db():
         yield db_session
 
@@ -93,9 +94,10 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture
-async def test_user(db_session: AsyncSession) -> User:
+async def test_user(db_session: AsyncSession):
     """Create a test user for authenticated tests."""
     from app.schemas.user import UserCreate
+    from app.services.user_service import UserService
 
     service = UserService(db_session)
     user_data = UserCreate(
@@ -109,15 +111,20 @@ async def test_user(db_session: AsyncSession) -> User:
 
 
 @pytest.fixture
-async def auth_headers(test_user: User) -> dict:
+async def auth_headers(test_user) -> dict:
     """Get auth headers for authenticated requests."""
+    from app.core.security import create_access_token
+
     token, _ = create_access_token(subject=test_user.id)  # Unpack tuple
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
-async def superuser(db_session: AsyncSession) -> User:
+async def superuser(db_session: AsyncSession):
     """Create a superuser for admin tests."""
+    from app.core.security import hash_password
+    from app.models.user import User
+
     user = User(
         email="admin@example.com",
         hashed_password=hash_password("AdminPassword123!"),  # Meets new password policy
@@ -132,7 +139,9 @@ async def superuser(db_session: AsyncSession) -> User:
 
 
 @pytest.fixture
-async def superuser_headers(superuser: User) -> dict:
+async def superuser_headers(superuser) -> dict:
     """Get auth headers for superuser requests."""
+    from app.core.security import create_access_token
+
     token, _ = create_access_token(subject=superuser.id)  # Unpack tuple
     return {"Authorization": f"Bearer {token}"}
