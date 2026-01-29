@@ -2,6 +2,12 @@
 
 A production-ready REST API template. Clone it, customize it, ship faster.
 
+## Prerequisites
+
+- Docker and Docker Compose
+- Make (optional, for convenience commands)
+- Python 3.12+ (only for local development without Docker)
+
 ## Why This Exists
 
 Every new project shouldn't start from zero. This template solves:
@@ -22,14 +28,14 @@ Every new project shouldn't start from zero. This template solves:
 ## Quick Start
 
 ```bash
-# Clone the template
-git clone https://github.com/yourusername/fastapi-starter.git my-project
+# Clone or fork this template
+git clone <your-repo-url> my-project
 cd my-project
 
 # Copy environment file
 cp .env.example .env
 
-# Generate a secure SECRET_KEY (must be at least 32 characters)
+# Generate a secure SECRET_KEY and add it to .env
 openssl rand -hex 32
 
 # Start everything
@@ -48,7 +54,7 @@ make dev
 | Validation | Pydantic v2 |
 | Auth | JWT (access + refresh tokens) with Redis-based revocation |
 | Database | PostgreSQL |
-| Cache | Redis (token revocation) |
+| Cache | Redis |
 | Migrations | Alembic |
 | Containers | Docker & Docker Compose |
 | Testing | Pytest (async) |
@@ -70,7 +76,7 @@ app/
 ## API Endpoints
 
 ### Health
-- `GET /api/v1/health/` - Basic health check
+- `GET /api/v1/health` - Basic health check
 - `GET /api/v1/health/ready` - Readiness check (DB connection)
 
 ### Auth
@@ -81,7 +87,7 @@ app/
 - `GET /api/v1/auth/me` - Get current user
 
 ### Users
-- `GET /api/v1/users/` - List users (admin only)
+- `GET /api/v1/users` - List users (admin only)
 - `GET /api/v1/users/{id}` - Get user (own profile or admin)
 - `PATCH /api/v1/users/{id}` - Update user (own profile or admin)
 - `DELETE /api/v1/users/{id}` - Delete user (admin only)
@@ -110,6 +116,46 @@ make migrate         # Run database migrations
 make migration m="add posts table"  # Create new migration
 ```
 
+## Testing
+
+```bash
+# Run all tests (in Docker)
+make test
+
+# Run tests with verbose output
+docker compose exec api pytest -v
+
+# Run specific test file
+docker compose exec api pytest tests/test_auth.py -v
+
+# Run with coverage
+docker compose exec api pytest --cov=app --cov-report=term-missing
+```
+
+## Local Development (without Docker)
+
+If you prefer running without Docker:
+
+```bash
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up environment variables (need local PostgreSQL and Redis)
+export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/dbname"
+export REDIS_URL="redis://localhost:6379/0"
+export SECRET_KEY="your-32-character-secret-key-here"
+
+# Run migrations
+alembic upgrade head
+
+# Start the server
+uvicorn app.main:app --reload
+```
+
 ## Customizing
 
 1. **Update config** - Edit `app/core/config.py` with your settings
@@ -127,10 +173,22 @@ make migration m="add posts table"  # Create new migration
 | `SECRET_KEY` | JWT signing key (min 32 chars) | Yes |
 | `REDIS_URL` | Redis connection string | Yes |
 | `DEBUG` | Enable debug mode | No (default: `false`) |
-| `CORS_ORIGINS` | Allowed origins (JSON array) | No (default: `[]`) |
+| `CORS_ORIGINS` | Allowed origins (JSON array) | No (default: `[]`, no CORS) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token TTL | No (default: `30`) |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token TTL | No (default: `7`) |
 | `RATE_LIMIT_PER_MINUTE` | Auth endpoint rate limit | No (default: `60`) |
+
+## Contributing
+
+Contributions are welcome. Please open an issue first to discuss what you'd like to change.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/improvement`)
+3. Make your changes
+4. Run tests (`make test`)
+5. Commit your changes
+6. Push to the branch
+7. Open a Pull Request
 
 ## License
 
