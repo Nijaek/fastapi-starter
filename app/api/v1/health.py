@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ServiceUnavailableError
 from app.db.session import get_db
 from app.schemas.common import MessageResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -22,4 +26,5 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
         await db.execute(text("SELECT 1"))
         return {"message": "ready"}
     except Exception as e:
-        raise ServiceUnavailableError(detail=f"not ready: {str(e)}") from e
+        logger.error(f"Readiness check failed: {e}")
+        raise ServiceUnavailableError(detail="Service not ready") from e

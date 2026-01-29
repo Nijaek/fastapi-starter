@@ -5,6 +5,7 @@ from app.core.validators import validate_password_strength
 
 class Token(BaseModel):
     """JWT token response."""
+
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -12,6 +13,7 @@ class Token(BaseModel):
 
 class TokenPayload(BaseModel):
     """JWT token payload."""
+
     sub: int | None = None
     exp: int | None = None
     type: str | None = None
@@ -19,6 +21,7 @@ class TokenPayload(BaseModel):
 
 class LoginRequest(BaseModel):
     """Login request body."""
+
     email: EmailStr
     password: str
 
@@ -38,4 +41,5 @@ class RegisterRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     """Token refresh request body."""
+
     refresh_token: str

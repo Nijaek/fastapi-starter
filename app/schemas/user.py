@@ -47,4 +47,5 @@ class UserResponse(BaseModel):
 
 class UserInDB(UserResponse):
     """Schema for user with hashed password (internal use)."""
+
     hashed_password: str

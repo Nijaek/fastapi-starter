@@ -21,9 +21,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_token(
-    subject: int, token_type: str, expires_delta: timedelta
-) -> tuple[str, str]:
+def create_token(subject: int, token_type: str, expires_delta: timedelta) -> tuple[str, str]:
     """Create a JWT token with the given subject and expiration.
 
     Returns:
@@ -70,9 +68,7 @@ def create_refresh_token(subject: int) -> tuple[str, str]:
 def decode_token(token: str) -> dict[str, Any] | None:
     """Decode and validate a JWT token. Returns None if invalid."""
     try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
     except jwt.PyJWTError:
         return None

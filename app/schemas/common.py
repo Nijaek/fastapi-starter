@@ -8,11 +8,13 @@ T = TypeVar("T")
 
 class MessageResponse(BaseModel):
     """Simple message response."""
+
     message: str
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
     """Paginated response wrapper."""
+
     items: list[T]
     total: int
     page: int
@@ -22,6 +24,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 class PaginationParams(BaseModel):
     """Pagination query parameters."""
+
     page: int = 1
     per_page: int = 20
 

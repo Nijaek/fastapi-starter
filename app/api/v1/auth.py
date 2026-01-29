@@ -41,9 +41,7 @@ def _get_refresh_token_ttl_seconds() -> int:
     return settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
 
-@router.post(
-    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def register(
     request: Request,
@@ -107,6 +105,9 @@ async def login_form(
     user = await service.authenticate(form_data.username, form_data.password)
     if not user:
         raise UnauthorizedError("Invalid email or password")
+
+    if not user.is_active:
+        raise UnauthorizedError("User is inactive")
 
     access_token, _ = create_access_token(user.id)
     refresh_token, refresh_jti = create_refresh_token(user.id)

@@ -10,13 +10,30 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Set test SECRET_KEY before importing app modules
 os.environ["SECRET_KEY"] = "test-secret-key-must-be-at-least-32-characters-long"
 
+
+class AsyncIterator:
+    """Async iterator for mocking redis.scan_iter."""
+
+    def __init__(self, items):
+        self.items = iter(items)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self.items)
+        except StopIteration as err:
+            raise StopAsyncIteration from err
+
+
 # Create a fake redis client for tests
 _fake_redis_client = MagicMock()
 _fake_redis_client.setex = AsyncMock(return_value=True)
 _fake_redis_client.get = AsyncMock(return_value=None)
 _fake_redis_client.exists = AsyncMock(return_value=True)
 _fake_redis_client.delete = AsyncMock(return_value=1)
-_fake_redis_client.scan_iter = MagicMock(return_value=iter([]))
+_fake_redis_client.scan_iter = MagicMock(return_value=AsyncIterator([]))
 _fake_redis_client.close = AsyncMock()
 
 
@@ -42,9 +59,7 @@ patch("app.core.security.get_redis", _mock_get_redis).start()
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestingSessionLocal = async_sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
-)
+TestingSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(scope="session")

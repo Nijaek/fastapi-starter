@@ -7,9 +7,7 @@ from app.models.user import User
 @pytest.mark.asyncio
 async def test_get_own_user(client: AsyncClient, auth_headers: dict, test_user: User):
     """Test user can get their own profile."""
-    response = await client.get(
-        f"/api/v1/users/{test_user.id}", headers=auth_headers
-    )
+    response = await client.get(f"/api/v1/users/{test_user.id}", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == test_user.email
@@ -57,9 +55,7 @@ async def test_superuser_can_get_any_user(
     client: AsyncClient, superuser_headers: dict, test_user: User
 ):
     """Test superuser can access any user's profile."""
-    response = await client.get(
-        f"/api/v1/users/{test_user.id}", headers=superuser_headers
-    )
+    response = await client.get(f"/api/v1/users/{test_user.id}", headers=superuser_headers)
     assert response.status_code == 200
     assert response.json()["email"] == test_user.email
 
@@ -69,15 +65,11 @@ async def test_delete_user_as_superuser(
     client: AsyncClient, superuser_headers: dict, test_user: User
 ):
     """Test superuser can delete users."""
-    response = await client.delete(
-        f"/api/v1/users/{test_user.id}", headers=superuser_headers
-    )
+    response = await client.delete(f"/api/v1/users/{test_user.id}", headers=superuser_headers)
     assert response.status_code == 204
 
     # Verify deletion
-    response = await client.get(
-        f"/api/v1/users/{test_user.id}", headers=superuser_headers
-    )
+    response = await client.get(f"/api/v1/users/{test_user.id}", headers=superuser_headers)
     assert response.status_code == 404
 
 
@@ -86,7 +78,5 @@ async def test_delete_user_requires_superuser(
     client: AsyncClient, auth_headers: dict, test_user: User
 ):
     """Test regular user cannot delete users."""
-    response = await client.delete(
-        f"/api/v1/users/{test_user.id}", headers=auth_headers
-    )
+    response = await client.delete(f"/api/v1/users/{test_user.id}", headers=auth_headers)
     assert response.status_code == 403

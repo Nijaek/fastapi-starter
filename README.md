@@ -99,7 +99,7 @@ This template includes security best practices:
 - **Password Policy**: Minimum 12 characters, must contain uppercase, lowercase, and digit
 - **Token Revocation**: Redis-based refresh token revocation with logout endpoint
 - **IDOR Protection**: Users can only access their own profile unless admin
-- **Rate Limiting**: Configurable rate limits on auth endpoints
+- **Rate Limiting**: Redis-backed rate limits shared across all workers
 - **No Default Secrets**: `SECRET_KEY` is required and must be at least 32 characters
 
 ## Common Commands
@@ -171,7 +171,7 @@ uvicorn app.main:app --reload
 |----------|-------------|----------|
 | `DATABASE_URL` | PostgreSQL connection string | Yes |
 | `SECRET_KEY` | JWT signing key (min 32 chars) | Yes |
-| `REDIS_URL` | Redis connection string | Yes |
+| `REDIS_URL` | Redis connection string (auth + rate limiting) | Yes |
 | `DEBUG` | Enable debug mode | No (default: `false`) |
 | `CORS_ORIGINS` | Allowed origins (JSON array) | No (default: `[]`, no CORS) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token TTL | No (default: `30`) |

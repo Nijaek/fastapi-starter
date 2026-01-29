@@ -1,5 +1,9 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import hash_password
+from app.models.user import User
 
 
 @pytest.mark.asyncio
@@ -139,4 +143,42 @@ async def test_get_me(client: AsyncClient, auth_headers: dict):
 async def test_get_me_unauthorized(client: AsyncClient):
     """Test get current user without auth fails."""
     response = await client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_inactive_user(client: AsyncClient, db_session: AsyncSession):
+    """Test that inactive users cannot login via /auth/login."""
+    user = User(
+        email="inactive@example.com",
+        hashed_password=hash_password("TestPassword123!"),
+        full_name="Inactive User",
+        is_active=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "inactive@example.com", "password": "TestPassword123!"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_form_inactive_user(client: AsyncClient, db_session: AsyncSession):
+    """Test that inactive users cannot login via /auth/login/form."""
+    user = User(
+        email="inactive_form@example.com",
+        hashed_password=hash_password("TestPassword123!"),
+        full_name="Inactive User Form",
+        is_active=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login/form",
+        data={"username": "inactive_form@example.com", "password": "TestPassword123!"},
+    )
     assert response.status_code == 401

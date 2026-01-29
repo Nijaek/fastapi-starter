@@ -23,18 +23,12 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         result = await self.db.execute(select(self.model).where(self.model.id == id))
         return result.scalar_one_or_none()
 
-    async def get_multi(
-        self, skip: int = 0, limit: int = 100
-    ) -> tuple[list[ModelType], int]:
+    async def get_multi(self, skip: int = 0, limit: int = 100) -> tuple[list[ModelType], int]:
         """Get multiple records with pagination."""
-        result = await self.db.execute(
-            select(self.model).offset(skip).limit(limit)
-        )
+        result = await self.db.execute(select(self.model).offset(skip).limit(limit))
         items = list(result.scalars().all())
 
-        count_result = await self.db.execute(
-            select(func.count()).select_from(self.model)
-        )
+        count_result = await self.db.execute(select(func.count()).select_from(self.model))
         total = count_result.scalar_one()
 
         return items, total
