@@ -1,7 +1,10 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+
+from app.db.session import get_db
+from app.main import app
 
 
 @pytest.mark.asyncio
@@ -21,7 +24,7 @@ async def test_readiness_check(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_readiness_error_does_not_leak_details(client: AsyncClient):
+async def test_readiness_error_does_not_leak_details():
     """Test that readiness errors don't expose internal DB details."""
     # Mock the database session to raise an error with sensitive info
     mock_session = AsyncMock()
@@ -29,19 +32,23 @@ async def test_readiness_error_does_not_leak_details(client: AsyncClient):
         side_effect=Exception("Connection refused to db.internal.corp:5432 - password auth failed")
     )
 
-    with patch("app.api.v1.health.get_db") as mock_get_db:
+    async def failing_db():
+        yield mock_session
 
-        async def override_db():
-            yield mock_session
+    # Use FastAPI's dependency override mechanism
+    app.dependency_overrides[get_db] = failing_db
 
-        mock_get_db.return_value = override_db()
-
-        response = await client.get("/api/v1/health/ready")
-        assert response.status_code == 503
-        response_text = response.text.lower()
-        # Should NOT contain internal details
-        assert "db.internal" not in response_text
-        assert "5432" not in response_text
-        assert "password" not in response_text
-        # Should contain generic message
-        assert "not ready" in response_text
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/v1/health/ready")
+            assert response.status_code == 503
+            response_text = response.text.lower()
+            # Should NOT contain internal details
+            assert "db.internal" not in response_text
+            assert "5432" not in response_text
+            assert "password" not in response_text
+            # Should contain generic message
+            assert "not ready" in response_text
+    finally:
+        app.dependency_overrides.clear()
