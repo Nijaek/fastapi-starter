@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_superuser, get_current_user
+from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.common import PaginatedResponse
@@ -13,7 +15,9 @@ router = APIRouter()
 
 
 @router.get("/", response_model=PaginatedResponse[UserResponse])
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def list_users(
+    request: Request,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -36,7 +40,9 @@ async def list_users(
 
 
 @router.get("/{user_id}", response_model=UserResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def get_user(
+    request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -56,7 +62,9 @@ async def get_user(
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def update_user(
+    request: Request,
     user_id: int,
     data: UserUpdate,
     db: AsyncSession = Depends(get_db),
@@ -92,7 +100,9 @@ async def update_user(
 
 
 @router.delete("/{user_id}", status_code=204)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
 async def delete_user(
+    request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),

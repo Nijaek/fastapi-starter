@@ -20,7 +20,9 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def get(self, id: int) -> ModelType | None:
         """Get a single record by ID."""
-        result = await self.db.execute(select(self.model).where(self.model.id == id))
+        result = await self.db.execute(
+            select(self.model).where(self.model.id == id)  # type: ignore[attr-defined]
+        )
         return result.scalar_one_or_none()
 
     async def get_multi(self, skip: int = 0, limit: int = 100) -> tuple[list[ModelType], int]:

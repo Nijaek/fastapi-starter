@@ -28,3 +28,19 @@ known-first-party = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+module = ["redis.*", "slowapi.*", "passlib.*"]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true

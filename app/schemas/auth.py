@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr
 
-from app.core.validators import validate_password_strength
+from app.schemas.user import UserCreate
 
 
 class Token(BaseModel):
@@ -26,17 +26,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class RegisterRequest(BaseModel):
-    """User registration request body."""
+class RegisterRequest(UserCreate):
+    """User registration request body (inherits from UserCreate)."""
 
-    email: EmailStr
-    password: str
-    full_name: str | None = None
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        return validate_password_strength(v)
+    pass
 
 
 class RefreshRequest(BaseModel):

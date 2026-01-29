@@ -25,6 +25,6 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
     try:
         await db.execute(text("SELECT 1"))
         return {"message": "ready"}
-    except Exception as e:
-        logger.error(f"Readiness check failed: {e}")
-        raise ServiceUnavailableError(detail="Service not ready") from e
+    except Exception:
+        logger.error("Readiness check failed: database connection error")
+        raise ServiceUnavailableError(detail="Service not ready") from None

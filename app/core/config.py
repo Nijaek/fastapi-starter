@@ -2,14 +2,14 @@ import logging
 import sys
 from functools import lru_cache
 
-from pydantic import ConfigDict, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = ConfigDict(
+    model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
     )
@@ -48,8 +48,12 @@ class Settings(BaseSettings):
     def validate_secret_key(cls, v: str) -> str:
         if len(v) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters")
-        if v == "change-me-in-production":
-            raise ValueError("SECRET_KEY must be changed from default")
+        insecure_keys = [
+            "change-me-in-production",
+            "your-super-secret-key-at-least-32-chars",
+        ]
+        if v in insecure_keys:
+            raise ValueError("SECRET_KEY must be changed from default value")
         return v
 
 

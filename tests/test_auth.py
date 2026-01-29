@@ -37,6 +37,21 @@ async def test_register_weak_password(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_register_password_without_special_char(client: AsyncClient):
+    """Test registration fails without special character in password."""
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "nospecial@example.com",
+            "password": "TestPassword1234",  # Meets length, upper, lower, digit, but no special char
+        },
+    )
+    assert response.status_code == 422
+    # Verify the error message mentions special character
+    assert "special character" in response.json()["detail"][0]["msg"].lower()
+
+
+@pytest.mark.asyncio
 async def test_register_duplicate_email(client: AsyncClient):
     """Test registration fails with duplicate email."""
     # First registration
