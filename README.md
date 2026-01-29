@@ -81,7 +81,8 @@ app/
 
 ### Auth
 - `POST /api/v1/auth/register` - Register new user
-- `POST /api/v1/auth/login` - Get tokens
+- `POST /api/v1/auth/login` - Get tokens (JSON body)
+- `POST /api/v1/auth/login/form` - Get tokens (OAuth2 form data)
 - `POST /api/v1/auth/refresh` - Refresh access token
 - `POST /api/v1/auth/logout` - Revoke refresh token
 - `GET /api/v1/auth/me` - Get current user
@@ -96,11 +97,12 @@ app/
 
 This template includes security best practices:
 
-- **Password Policy**: Minimum 12 characters, must contain uppercase, lowercase, and digit
+- **Password Policy**: Minimum 12 characters, must contain uppercase, lowercase, digit, and special character
 - **Token Revocation**: Redis-based refresh token revocation with logout endpoint
 - **IDOR Protection**: Users can only access their own profile unless admin
-- **Rate Limiting**: Redis-backed rate limits shared across all workers
+- **Rate Limiting**: Configurable rate limits on auth endpoints
 - **No Default Secrets**: `SECRET_KEY` is required and must be at least 32 characters
+- **Security Headers**: X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Permissions-Policy, HSTS (production only)
 
 ## Common Commands
 
@@ -177,6 +179,10 @@ uvicorn app.main:app --reload
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token TTL | No (default: `30`) |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token TTL | No (default: `7`) |
 | `RATE_LIMIT_PER_MINUTE` | Auth endpoint rate limit | No (default: `60`) |
+| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | No (default: `INFO`) |
+| `PROJECT_NAME` | API title shown in docs | No (default: `FastAPI Starter`) |
+| `DB_POOL_SIZE` | Database connection pool size | No (default: `5`) |
+| `DB_MAX_OVERFLOW` | Max overflow connections | No (default: `10`) |
 
 ## Contributing
 
