@@ -7,8 +7,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# Set test SECRET_KEY before importing app modules
+# Set test env vars before importing app modules
 os.environ["SECRET_KEY"] = "test-secret-key-must-be-at-least-32-characters-long"
+os.environ["REDIS_URL"] = "memory://"
 
 
 class AsyncIterator:
