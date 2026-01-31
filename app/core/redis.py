@@ -73,9 +73,7 @@ async def safe_redis_exists(key: str, fail_closed: bool = True) -> bool:
         raise ServiceUnavailableError("Unable to verify token status") from None
 
 
-async def safe_redis_setex(
-    key: str, ttl: int, value: str, raise_on_error: bool = True
-) -> bool:
+async def safe_redis_setex(key: str, ttl: int, value: str, raise_on_error: bool = True) -> bool:
     """Set key with expiration, with error handling.
 
     Args:

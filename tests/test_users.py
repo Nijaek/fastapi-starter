@@ -142,9 +142,7 @@ async def test_update_user_password_via_patch_ignored(
 
 
 @pytest.mark.asyncio
-async def test_change_password_success(
-    client: AsyncClient, auth_headers: dict, test_user: User
-):
+async def test_change_password_success(client: AsyncClient, auth_headers: dict, test_user: User):
     """Test user can change password via dedicated endpoint."""
     response = await client.post(
         "/api/v1/users/me/password",
@@ -182,9 +180,7 @@ async def test_change_password_wrong_current(
 
 
 @pytest.mark.asyncio
-async def test_change_password_weak_new(
-    client: AsyncClient, auth_headers: dict, test_user: User
-):
+async def test_change_password_weak_new(client: AsyncClient, auth_headers: dict, test_user: User):
     """Test password change fails with weak new password."""
     response = await client.post(
         "/api/v1/users/me/password",
