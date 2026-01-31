@@ -156,8 +156,8 @@ async def test_user(db_session: AsyncSession):
 @pytest.fixture
 async def auth_headers(test_user) -> dict:
     """Get auth headers for authenticated requests."""
-    from app.core.security import create_access_token, store_access_token
     from app.core.config import settings
+    from app.core.security import create_access_token, store_access_token
 
     token, jti = create_access_token(subject=test_user.id)
     # Store the access token in Redis so it passes revocation check
@@ -191,8 +191,8 @@ async def superuser(db_session: AsyncSession):
 @pytest.fixture
 async def superuser_headers(superuser) -> dict:
     """Get auth headers for superuser requests."""
-    from app.core.security import create_access_token, store_access_token
     from app.core.config import settings
+    from app.core.security import create_access_token, store_access_token
 
     token, jti = create_access_token(subject=superuser.id)
     # Store the access token in Redis so it passes revocation check
