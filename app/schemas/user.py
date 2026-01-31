@@ -19,18 +19,33 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    """Schema for updating an existing user."""
+    """Schema for updating an existing user (excludes password - use PasswordChange)."""
 
     email: EmailStr | None = None
-    password: str | None = None
     full_name: str | None = None
 
-    @field_validator("password")
+
+class PasswordChange(BaseModel):
+    """Schema for password change request (requires current password)."""
+
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
     @classmethod
-    def validate_password(cls, v: str | None) -> str | None:
-        if v is not None:
-            return validate_password_strength(v)
-        return v
+    def validate_new_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
+class PasswordReset(BaseModel):
+    """Schema for admin password reset (no current password required)."""
+
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 class UserResponse(BaseModel):

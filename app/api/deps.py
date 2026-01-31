@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import UnauthorizedError
-from app.core.security import decode_token
+from app.core.security import decode_token, is_access_token_revoked
 from app.db.session import get_db
 from app.models.user import User
 from app.services.user_service import UserService
@@ -25,8 +25,13 @@ async def get_current_user(
         raise UnauthorizedError("Invalid token type")
 
     user_id = payload.get("sub")
-    if not user_id:
+    jti = payload.get("jti")
+    if not user_id or not jti:
         raise UnauthorizedError("Invalid token payload")
+
+    # Check if access token has been revoked
+    if await is_access_token_revoked(jti):
+        raise UnauthorizedError("Token has been revoked")
 
     service = UserService(db)
     user = await service.get(int(user_id))

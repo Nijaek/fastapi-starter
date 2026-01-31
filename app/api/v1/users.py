@@ -3,12 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_superuser, get_current_user
 from app.core.config import settings
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import NotFoundError
 from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.common import PaginatedResponse
-from app.schemas.user import UserResponse, UserUpdate
+from app.schemas.user import PasswordChange, PasswordReset, UserResponse, UserUpdate
 from app.services.user_service import UserService
 
 router = APIRouter()
@@ -80,23 +80,59 @@ async def update_user(
     if not user:
         raise NotFoundError("User not found")
 
-    # Check email uniqueness if changing
+    # Handle email update with race condition protection
     if data.email and data.email != user.email:
-        existing = await service.get_by_email(data.email)
-        if existing:
-            raise ConflictError("Email already in use")
+        await service.update_email(user, data.email)
 
-    # Handle password separately
-    if data.password:
-        await service.update_password(user, data.password)
-
-    # Exclude password from the update data
-    update_data = data.model_dump(exclude_unset=True, exclude={"password"})
+    # Update other fields (email handled above)
+    update_data = data.model_dump(exclude_unset=True, exclude={"email"})
     for field, value in update_data.items():
         setattr(user, field, value)
     await service.db.flush()
     await service.db.refresh(user)
     return user
+
+
+@router.post("/me/password", status_code=204)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+async def change_password(
+    request: Request,
+    data: PasswordChange,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Change the current user's password (requires current password verification)."""
+    service = UserService(db)
+    await service.update_password(
+        user=current_user,
+        new_password=data.new_password,
+        current_password=data.current_password,
+    )
+    return None
+
+
+@router.post("/{user_id}/password", status_code=204)
+@limiter.limit(f"{settings.RATE_LIMIT_PER_MINUTE}/minute")
+async def reset_user_password(
+    request: Request,
+    user_id: int,
+    data: PasswordReset,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_superuser),
+):
+    """Reset a user's password (superuser only, no current password required)."""
+    service = UserService(db)
+    user = await service.get(user_id)
+
+    if not user:
+        raise NotFoundError("User not found")
+
+    await service.update_password(
+        user=user,
+        new_password=data.new_password,
+        skip_verification=True,
+    )
+    return None
 
 
 @router.delete("/{user_id}", status_code=204)

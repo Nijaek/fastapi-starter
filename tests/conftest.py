@@ -27,14 +27,54 @@ class AsyncIterator:
             raise StopAsyncIteration from err
 
 
-# Create a fake redis client for tests
+# Stateful Redis mock for proper token tracking
+class FakeRedisStore:
+    """Stateful fake Redis for testing token storage/revocation."""
+
+    def __init__(self):
+        self.store: dict[str, str] = {}
+
+    def clear(self):
+        self.store.clear()
+
+    async def setex(self, key: str, ttl: int, value: str) -> bool:
+        self.store[key] = value
+        return True
+
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    async def exists(self, key: str) -> int:
+        return 1 if key in self.store else 0
+
+    async def delete(self, *keys: str) -> int:
+        count = 0
+        for key in keys:
+            if key in self.store:
+                del self.store[key]
+                count += 1
+        return count
+
+    def scan_iter(self, pattern: str):
+        import fnmatch
+
+        matching = [k for k in self.store.keys() if fnmatch.fnmatch(k, pattern)]
+        return AsyncIterator(matching)
+
+    async def close(self):
+        pass
+
+
+_fake_redis_store = FakeRedisStore()
+
+# Create a fake redis client that delegates to the store
 _fake_redis_client = MagicMock()
-_fake_redis_client.setex = AsyncMock(return_value=True)
-_fake_redis_client.get = AsyncMock(return_value=None)
-_fake_redis_client.exists = AsyncMock(return_value=True)
-_fake_redis_client.delete = AsyncMock(return_value=1)
-_fake_redis_client.scan_iter = MagicMock(return_value=AsyncIterator([]))
-_fake_redis_client.close = AsyncMock()
+_fake_redis_client.setex = AsyncMock(side_effect=_fake_redis_store.setex)
+_fake_redis_client.get = AsyncMock(side_effect=_fake_redis_store.get)
+_fake_redis_client.exists = AsyncMock(side_effect=_fake_redis_store.exists)
+_fake_redis_client.delete = AsyncMock(side_effect=_fake_redis_store.delete)
+_fake_redis_client.scan_iter = MagicMock(side_effect=_fake_redis_store.scan_iter)
+_fake_redis_client.close = AsyncMock(side_effect=_fake_redis_store.close)
 
 
 async def _mock_get_redis():
@@ -62,6 +102,9 @@ if TYPE_CHECKING:
 @pytest.fixture(autouse=True)
 async def setup_database():
     from app.db.base import Base
+
+    # Clear Redis store for each test
+    _fake_redis_store.clear()
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -113,9 +156,16 @@ async def test_user(db_session: AsyncSession):
 @pytest.fixture
 async def auth_headers(test_user) -> dict:
     """Get auth headers for authenticated requests."""
-    from app.core.security import create_access_token
+    from app.core.security import create_access_token, store_access_token
+    from app.core.config import settings
 
-    token, _ = create_access_token(subject=test_user.id)  # Unpack tuple
+    token, jti = create_access_token(subject=test_user.id)
+    # Store the access token in Redis so it passes revocation check
+    await store_access_token(
+        user_id=test_user.id,
+        jti=jti,
+        expires_in_seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -141,7 +191,14 @@ async def superuser(db_session: AsyncSession):
 @pytest.fixture
 async def superuser_headers(superuser) -> dict:
     """Get auth headers for superuser requests."""
-    from app.core.security import create_access_token
+    from app.core.security import create_access_token, store_access_token
+    from app.core.config import settings
 
-    token, _ = create_access_token(subject=superuser.id)  # Unpack tuple
+    token, jti = create_access_token(subject=superuser.id)
+    # Store the access token in Redis so it passes revocation check
+    await store_access_token(
+        user_id=superuser.id,
+        jti=jti,
+        expires_in_seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
     return {"Authorization": f"Bearer {token}"}

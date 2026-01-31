@@ -51,6 +51,8 @@ class Settings(BaseSettings):
         insecure_keys = [
             "change-me-in-production",
             "your-super-secret-key-at-least-32-chars",
+            "dev-secret-key-not-for-production",
+            "dev-secret-key-change-in-production-min32chars",
         ]
         if v in insecure_keys:
             raise ValueError("SECRET_KEY must be changed from default value")

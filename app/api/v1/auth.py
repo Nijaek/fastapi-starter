@@ -12,7 +12,9 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     is_token_revoked,
+    revoke_all_user_access_tokens,
     revoke_token,
+    store_access_token,
     store_refresh_token,
 )
 from app.db.session import get_db
@@ -34,6 +36,11 @@ class LogoutResponse(BaseModel):
     """Logout response."""
 
     message: str = "Successfully logged out"
+
+
+def _get_access_token_ttl_seconds() -> int:
+    """Get access token TTL in seconds."""
+    return settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
 
 def _get_refresh_token_ttl_seconds() -> int:
@@ -76,8 +83,15 @@ async def login(
     if not user.is_active:
         raise UnauthorizedError("User is inactive")
 
-    access_token, _ = create_access_token(user.id)
+    access_token, access_jti = create_access_token(user.id)
     refresh_token, refresh_jti = create_refresh_token(user.id)
+
+    # Store access token in Redis
+    await store_access_token(
+        user_id=user.id,
+        jti=access_jti,
+        expires_in_seconds=_get_access_token_ttl_seconds(),
+    )
 
     # Store refresh token in Redis
     await store_refresh_token(
@@ -109,8 +123,15 @@ async def login_form(
     if not user.is_active:
         raise UnauthorizedError("User is inactive")
 
-    access_token, _ = create_access_token(user.id)
+    access_token, access_jti = create_access_token(user.id)
     refresh_token, refresh_jti = create_refresh_token(user.id)
+
+    # Store access token in Redis
+    await store_access_token(
+        user_id=user.id,
+        jti=access_jti,
+        expires_in_seconds=_get_access_token_ttl_seconds(),
+    )
 
     # Store refresh token in Redis
     await store_refresh_token(
@@ -157,9 +178,19 @@ async def refresh_token_endpoint(
     # Revoke old refresh token
     await revoke_token(jti)
 
+    # Revoke all old access tokens for this user
+    await revoke_all_user_access_tokens(user.id)
+
     # Create new tokens
-    access_token, _ = create_access_token(user.id)
+    access_token, access_jti = create_access_token(user.id)
     new_refresh_token, new_refresh_jti = create_refresh_token(user.id)
+
+    # Store new access token
+    await store_access_token(
+        user_id=user.id,
+        jti=access_jti,
+        expires_in_seconds=_get_access_token_ttl_seconds(),
+    )
 
     # Store new refresh token
     await store_refresh_token(
@@ -180,18 +211,22 @@ async def logout(
     request: Request,
     data: LogoutRequest,
 ):
-    """Logout and revoke the refresh token."""
+    """Logout and revoke all tokens for the user."""
     payload = decode_token(data.refresh_token)
 
     if not payload or payload.get("type") != "refresh":
         raise UnauthorizedError("Invalid refresh token")
 
     jti = payload.get("jti")
-    if not jti:
+    user_id = payload.get("sub")
+    if not jti or not user_id:
         raise UnauthorizedError("Invalid token payload")
 
     # Revoke the refresh token
     await revoke_token(jti)
+
+    # Revoke all access tokens for this user
+    await revoke_all_user_access_tokens(int(user_id))
 
     return LogoutResponse()
 

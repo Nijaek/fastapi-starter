@@ -356,3 +356,86 @@ async def test_access_with_refresh_token(client: AsyncClient):
         headers={"Authorization": f"Bearer {refresh_token}"},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_access_token_revoked_after_logout(client: AsyncClient):
+    """Test that access token is invalidated after logout."""
+    # Register and login
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": "revoke@example.com", "password": "TestPassword123!"},
+    )
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "revoke@example.com", "password": "TestPassword123!"},
+    )
+    tokens = login_response.json()
+    access_token = tokens["access_token"]
+    refresh_token = tokens["refresh_token"]
+
+    # Verify access works before logout
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 200
+
+    # Logout
+    await client.post(
+        "/api/v1/auth/logout",
+        json={"refresh_token": refresh_token},
+    )
+
+    # Verify access token no longer works
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_access_token_revoked_after_refresh(client: AsyncClient):
+    """Test that old access token is revoked after token refresh."""
+    # Register and login
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": "refreshrevoke@example.com", "password": "TestPassword123!"},
+    )
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "refreshrevoke@example.com", "password": "TestPassword123!"},
+    )
+    tokens = login_response.json()
+    old_access_token = tokens["access_token"]
+    refresh_token = tokens["refresh_token"]
+
+    # Verify access works before refresh
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {old_access_token}"},
+    )
+    assert response.status_code == 200
+
+    # Refresh tokens
+    refresh_response = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+    new_tokens = refresh_response.json()
+    new_access_token = new_tokens["access_token"]
+
+    # Verify old access token no longer works
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {old_access_token}"},
+    )
+    assert response.status_code == 401
+
+    # Verify new access token works
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {new_access_token}"},
+    )
+    assert response.status_code == 200
